@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+triomphe = { version = "0.1.11", optional = true, default-features = false }
 
 [features]
 default = ["std"]

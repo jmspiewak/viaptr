@@ -9,6 +9,11 @@ use core::{mem, mem::align_of, num::NonZeroUsize, ptr};
 #[doc(cfg(feature = "std"))]
 mod std;
 
+#[cfg(any(feature = "triomphe", doc))]
+#[doc(cfg(feature = "triomphe"))]
+mod triomphe;
+
+
 pub unsafe trait Pointer {
     fn into_ptr(value: Self) -> *const ();
     unsafe fn from_ptr(ptr: *const ()) -> Self;
