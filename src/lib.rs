@@ -3,7 +3,14 @@
 #![feature(doc_cfg)]
 #![cfg_attr(not(any(feature = "std", doc)), no_std)]
 
-use core::{mem, mem::align_of, num::NonZeroUsize, ptr};
+use core::{
+    borrow::Borrow,
+    mem,
+    mem::align_of,
+    num::NonZeroUsize,
+    ops::{Deref, DerefMut},
+    ptr,
+};
 
 #[cfg(any(feature = "std", doc))]
 #[doc(cfg(feature = "std"))]
@@ -188,6 +195,86 @@ unsafe impl Aligned for () {
 }
 
 unsafe impl CloneInPlace for () {}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Maybe<T>(pub Option<T>);
+
+impl<T> From<Option<T>> for Maybe<T> {
+    fn from(value: Option<T>) -> Self {
+        Self(value)
+    }
+}
+
+impl<T> From<Maybe<T>> for Option<T> {
+    fn from(value: Maybe<T>) -> Self {
+        value.0
+    }
+}
+
+impl<T> Deref for Maybe<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for Maybe<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T> Borrow<Option<T>> for Maybe<T> {
+    fn borrow(&self) -> &Option<T> {
+        &self.0
+    }
+}
+
+unsafe impl<T: Pointer + NonNull> Pointer for Maybe<T> {
+    fn into_ptr(value: Self) -> *const () {
+        match value.into() {
+            Some(x) => T::into_ptr(x),
+            None => ptr::null(),
+        }
+    }
+
+    unsafe fn from_ptr(ptr: *const ()) -> Self {
+        if ptr.is_null() {
+            Self(None)
+        } else {
+            Self(Some(unsafe { T::from_ptr(ptr) }))
+        }
+    }
+}
+
+unsafe impl<T: Aligned> Aligned for Maybe<T> {
+    const ALIGNMENT: usize = T::ALIGNMENT;
+}
+
+unsafe impl<T: CloneInPlace> CloneInPlace for Maybe<T> {}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Null;
+
+unsafe impl Pointer for Null {
+    fn into_ptr(_: Self) -> *const () {
+        ptr::null()
+    }
+
+    unsafe fn from_ptr(ptr: *const ()) -> Self {
+        debug_assert!(ptr.is_null());
+        Null
+    }
+}
+
+unsafe impl Aligned for Null {
+    const ALIGNMENT: usize = 1 << (usize::BITS - 1);
+}
+
+unsafe impl CloneInPlace for Null {}
 
 
 pub(crate) const fn min(x: usize, y: usize) -> usize {
