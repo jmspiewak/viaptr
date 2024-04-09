@@ -198,6 +198,73 @@ unsafe impl CloneInPlace for () {}
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Bits<const N: u32>(usize);
+
+impl<const N: u32> Bits<N> {
+    #[doc(hidden)]
+    pub const FITS: () = assert!(N <= usize::BITS);
+    pub const MASK: usize = (1 << N) - 1;
+    const PTR_SHIFT: u32 = usize::BITS - N;
+
+    pub const fn new(value: usize) -> Option<Self> {
+        if value & Self::MASK != value {
+            None
+        } else {
+            Some(Self(value))
+        }
+    }
+
+    pub const fn new_masked(value: usize) -> Self {
+        Self(value & Self::MASK)
+    }
+
+    pub const fn value(self) -> usize {
+        self.0
+    }
+}
+
+unsafe impl<const N: u32> Pointer for Bits<N> {
+    fn into_ptr(value: Self) -> *const () {
+        ptr::without_provenance(value.0 << Self::PTR_SHIFT)
+    }
+
+    unsafe fn from_ptr(ptr: *const ()) -> Self {
+        Self(ptr.addr() >> Self::PTR_SHIFT)
+    }
+}
+
+unsafe impl<const N: u32> Aligned for Bits<N> {
+    const ALIGNMENT: usize = 1 << Self::PTR_SHIFT;
+}
+
+unsafe impl<const N: u32> CloneInPlace for Bits<N> {}
+
+
+unsafe impl<P: Pointer + Aligned, const N: u32> Pointer for (P, Bits<N>) {
+    fn into_ptr(value: Self) -> *const () {
+        let ptr = P::into_ptr(value.0);
+        let tag = value.1.value() << Self::ALIGNMENT.trailing_zeros();
+        ptr.map_addr(|a| a | tag)
+    }
+
+    unsafe fn from_ptr(ptr: *const ()) -> Self {
+        let ptr_mask = !(P::ALIGNMENT - 1);
+        let value = P::from_ptr(ptr.mask(ptr_mask));
+        let tag = Bits::<N>::new_masked(ptr.addr() >> Self::ALIGNMENT.trailing_zeros());
+        (value, tag)
+    }
+}
+
+unsafe impl<P: NonNull, const N: u32> NonNull for (P, Bits<N>) {}
+
+unsafe impl<P: Aligned, const N: u32> Aligned for (P, Bits<N>) {
+    const ALIGNMENT: usize = P::ALIGNMENT >> N;
+}
+
+unsafe impl<P: CloneInPlace, const N: u32> CloneInPlace for (P, Bits<N>) {}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Maybe<T>(pub Option<T>);
 
 impl<T> From<Option<T>> for Maybe<T> {
