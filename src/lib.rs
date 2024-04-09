@@ -71,6 +71,68 @@ unsafe impl<T> Aligned for &'static T {
 unsafe impl<T> CloneInPlace for &'static T {}
 
 
+unsafe impl<T: Pointer + Aligned> Pointer for Option<T> {
+    fn into_ptr(value: Self) -> *const () {
+        match value {
+            Some(x) => T::into_ptr(x),
+            None => ptr::without_provenance(Self::ALIGNMENT),
+        }
+    }
+
+    unsafe fn from_ptr(ptr: *const ()) -> Self {
+        let tag = ptr.addr() & Self::ALIGNMENT;
+        let ptr = ptr.mask(!((Self::ALIGNMENT << 1) - 1));
+
+        unsafe {
+            match tag {
+                0 => Some(T::from_ptr(ptr)),
+                _ => None,
+            }
+        }
+    }
+}
+
+unsafe impl<T: NonNull> NonNull for Option<T> {}
+
+unsafe impl<T: Aligned> Aligned for Option<T> {
+    const ALIGNMENT: usize = T::ALIGNMENT >> 1;
+}
+
+unsafe impl<T: CloneInPlace> CloneInPlace for Option<T> {}
+
+
+unsafe impl<T: Pointer + Aligned, E: Pointer + Aligned> Pointer for Result<T, E> {
+    fn into_ptr(value: Self) -> *const () {
+        let (ptr, tag) = match value {
+            Ok(x) => (T::into_ptr(x), 0),
+            Err(x) => (E::into_ptr(x), Self::ALIGNMENT),
+        };
+
+        ptr.map_addr(|a| a | tag)
+    }
+
+    unsafe fn from_ptr(ptr: *const ()) -> Self {
+        let tag = ptr.addr() & Self::ALIGNMENT;
+        let ptr = ptr.mask(!((Self::ALIGNMENT << 1) - 1));
+
+        unsafe {
+            match tag {
+                0 => Ok(T::from_ptr(ptr)),
+                _ => Err(E::from_ptr(ptr)),
+            }
+        }
+    }
+}
+
+unsafe impl<T: NonNull, E> NonNull for Result<T, E> {}
+
+unsafe impl<T: Aligned, E: Aligned> Aligned for Result<T, E> {
+    const ALIGNMENT: usize = min(T::ALIGNMENT, E::ALIGNMENT) >> 1;
+}
+
+unsafe impl<T: CloneInPlace, E: CloneInPlace> CloneInPlace for Result<T, E> {}
+
+
 unsafe impl Pointer for usize {
     fn into_ptr(value: Self) -> *const () {
         ptr::without_provenance(value)
@@ -117,3 +179,12 @@ unsafe impl Aligned for () {
 }
 
 unsafe impl CloneInPlace for () {}
+
+
+pub(crate) const fn min(x: usize, y: usize) -> usize {
+    if x < y {
+        x
+    } else {
+        y
+    }
+}
