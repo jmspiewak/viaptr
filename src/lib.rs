@@ -1,9 +1,13 @@
 #![feature(ptr_mask)]
 #![feature(strict_provenance)]
-#![no_std]
+#![feature(doc_cfg)]
+#![cfg_attr(not(any(feature = "std", doc)), no_std)]
 
 use core::{mem, mem::align_of, num::NonZeroUsize, ptr};
 
+#[cfg(any(feature = "std", doc))]
+#[doc(cfg(feature = "std"))]
+mod std;
 
 pub unsafe trait Pointer {
     fn into_ptr(value: Self) -> *const ();
@@ -183,6 +187,14 @@ unsafe impl CloneInPlace for () {}
 
 pub(crate) const fn min(x: usize, y: usize) -> usize {
     if x < y {
+        x
+    } else {
+        y
+    }
+}
+
+pub(crate) const fn max(x: usize, y: usize) -> usize {
+    if x > y {
         x
     } else {
         y
