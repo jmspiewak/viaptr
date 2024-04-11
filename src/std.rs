@@ -6,15 +6,15 @@ use std::{
     sync::{atomic::AtomicUsize, Arc},
 };
 
-use crate::{max, Aligned, CloneInPlace, NonNull, Pointer};
+use crate::{max, Aligned, CloneInPlace, Leak, NonNull, Pointer};
 
 unsafe impl<T> Pointer for Box<T> {
     fn into_ptr(value: Self) -> *const () {
         Box::into_raw(value) as *const ()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        Box::from_raw(ptr as *mut T)
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { Box::from_raw(ptr as *mut T) })
     }
 }
 
@@ -30,8 +30,8 @@ unsafe impl<T> Pointer for Rc<T> {
         Rc::into_raw(value).cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        Rc::from_raw(ptr.cast())
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { Rc::from_raw(ptr.cast()) })
     }
 }
 
@@ -49,8 +49,8 @@ unsafe impl<T> Pointer for rc::Weak<T> {
         rc::Weak::into_raw(value).cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        rc::Weak::from_raw(ptr.cast())
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { rc::Weak::from_raw(ptr.cast()) })
     }
 }
 
@@ -62,8 +62,8 @@ unsafe impl<T> Pointer for Arc<T> {
         Arc::into_raw(value).cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        Arc::from_raw(ptr.cast())
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { Arc::from_raw(ptr.cast()) })
     }
 }
 
@@ -81,8 +81,8 @@ unsafe impl<T> Pointer for sync::Weak<T> {
         sync::Weak::into_raw(value).cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        sync::Weak::from_raw(ptr.cast())
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { sync::Weak::from_raw(ptr.cast()) })
     }
 }
 

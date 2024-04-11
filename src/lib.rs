@@ -2,11 +2,12 @@
 #![feature(strict_provenance)]
 #![feature(doc_cfg)]
 #![cfg_attr(not(any(feature = "std", doc)), no_std)]
+#![warn(unsafe_op_in_unsafe_fn)]
 
 use core::{
     borrow::Borrow,
     mem,
-    mem::align_of,
+    mem::{align_of, ManuallyDrop},
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
     ptr,
@@ -21,9 +22,9 @@ mod std;
 mod triomphe;
 
 
-pub unsafe trait Pointer {
+pub unsafe trait Pointer: Sized {
     fn into_ptr(value: Self) -> *const ();
-    unsafe fn from_ptr(ptr: *const ()) -> Self;
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self>;
 }
 
 pub unsafe trait NonNull {}
@@ -40,7 +41,32 @@ pub unsafe trait CloneInPlace: Clone {}
 pub unsafe fn clone_in_place<T: Pointer + CloneInPlace>(ptr: *const ()) {
     let value = unsafe { T::from_ptr(ptr) };
     mem::forget(value.clone());
-    mem::forget(value);
+}
+
+
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Leak<T>(ManuallyDrop<T>);
+
+impl<T> Leak<T> {
+    pub const fn new(x: T) -> Self {
+        Self(ManuallyDrop::new(x))
+    }
+
+    pub const unsafe fn unleak(this: Self) -> T {
+        ManuallyDrop::into_inner(this.0)
+    }
+
+    pub unsafe fn map<U>(this: Self, f: impl FnOnce(T) -> U) -> Leak<U> {
+        Leak::new(f(unsafe { Self::unleak(this) }))
+    }
+}
+
+impl<T> Deref for Leak<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
 }
 
 
@@ -49,8 +75,8 @@ unsafe impl<T> Pointer for *const T {
         value.cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        ptr.cast()
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(ptr.cast())
     }
 }
 
@@ -60,8 +86,8 @@ unsafe impl<T> Pointer for ptr::NonNull<T> {
         value.as_ptr() as *const ()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        ptr::NonNull::new_unchecked(ptr as *mut T)
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { ptr::NonNull::new_unchecked(ptr as *mut T) })
     }
 }
 
@@ -73,8 +99,8 @@ unsafe impl<T> Pointer for &'static T {
         ptr::from_ref(value).cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        unsafe { &*ptr.cast() }
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { &*ptr.cast() })
     }
 }
 
@@ -95,15 +121,14 @@ unsafe impl<T: Pointer + Aligned> Pointer for Option<T> {
         }
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
         let tag = ptr.addr() & Self::ALIGNMENT;
         let ptr = ptr.mask(!((Self::ALIGNMENT << 1) - 1));
 
-        unsafe {
-            match tag {
-                0 => Some(T::from_ptr(ptr)),
-                _ => None,
-            }
+        if tag == 0 {
+            unsafe { Leak::map(T::from_ptr(ptr), Some) }
+        } else {
+            Leak::new(None)
         }
     }
 }
@@ -127,15 +152,14 @@ unsafe impl<T: Pointer + Aligned, E: Pointer + Aligned> Pointer for Result<T, E>
         ptr.map_addr(|a| a | tag)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
         let tag = ptr.addr() & Self::ALIGNMENT;
         let ptr = ptr.mask(!((Self::ALIGNMENT << 1) - 1));
 
-        unsafe {
-            match tag {
-                0 => Ok(T::from_ptr(ptr)),
-                _ => Err(E::from_ptr(ptr)),
-            }
+        if tag == 0 {
+            unsafe { Leak::map(T::from_ptr(ptr), Ok) }
+        } else {
+            unsafe { Leak::map(E::from_ptr(ptr), Err) }
         }
     }
 }
@@ -154,8 +178,8 @@ unsafe impl Pointer for usize {
         ptr::without_provenance(value)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        ptr.addr()
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(ptr.addr())
     }
 }
 
@@ -167,8 +191,8 @@ unsafe impl Pointer for NonZeroUsize {
         ptr::without_provenance(value.into())
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        NonZeroUsize::new_unchecked(ptr.addr())
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { NonZeroUsize::new_unchecked(ptr.addr()) })
     }
 }
 
@@ -182,9 +206,9 @@ unsafe impl Pointer for () {
         ptr::without_provenance(Self::ALIGNMENT)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
         debug_assert!(ptr.addr() == Self::ALIGNMENT);
-        ()
+        Leak::new(())
     }
 }
 
@@ -228,8 +252,8 @@ unsafe impl<const N: u32> Pointer for Bits<N> {
         ptr::without_provenance(value.0 << Self::PTR_SHIFT)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        Self(ptr.addr() >> Self::PTR_SHIFT)
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(Self(ptr.addr() >> Self::PTR_SHIFT))
     }
 }
 
@@ -247,11 +271,10 @@ unsafe impl<P: Pointer + Aligned, const N: u32> Pointer for (P, Bits<N>) {
         ptr.map_addr(|a| a | tag)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        let ptr_mask = !(P::ALIGNMENT - 1);
-        let value = P::from_ptr(ptr.mask(ptr_mask));
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
         let tag = Bits::<N>::new_masked(ptr.addr() >> Self::ALIGNMENT.trailing_zeros());
-        (value, tag)
+        let ptr = ptr.mask(!(P::ALIGNMENT - 1));
+        unsafe { Leak::map(P::from_ptr(ptr), |p| (p, tag)) }
     }
 }
 
@@ -307,11 +330,11 @@ unsafe impl<T: Pointer + NonNull> Pointer for Maybe<T> {
         }
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
         if ptr.is_null() {
-            Self(None)
+            Leak::new(Self(None))
         } else {
-            Self(Some(unsafe { T::from_ptr(ptr) }))
+            unsafe { Leak::map(T::from_ptr(ptr), |p| Self(Some(p))) }
         }
     }
 }
@@ -331,9 +354,9 @@ unsafe impl Pointer for Null {
         ptr::null()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
         debug_assert!(ptr.is_null());
-        Null
+        Leak::new(Null)
     }
 }
 

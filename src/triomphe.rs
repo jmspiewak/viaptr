@@ -2,15 +2,15 @@ use core::{mem::align_of, sync::atomic::AtomicUsize};
 
 use triomphe::{Arc, ThinArc};
 
-use crate::{max, Aligned, CloneInPlace, NonNull, Pointer};
+use crate::{max, Aligned, CloneInPlace, Leak, NonNull, Pointer};
 
 unsafe impl<T> Pointer for Arc<T> {
     fn into_ptr(value: Self) -> *const () {
         Arc::into_raw(value).cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        Arc::from_raw(ptr.cast())
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { Arc::from_raw(ptr.cast()) })
     }
 }
 
@@ -28,8 +28,8 @@ unsafe impl<H, T> Pointer for ThinArc<H, T> {
         ThinArc::into_raw(value).cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Self {
-        ThinArc::from_raw(ptr.cast())
+    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+        Leak::new(unsafe { ThinArc::from_raw(ptr.cast()) })
     }
 }
 
