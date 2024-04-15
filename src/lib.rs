@@ -24,7 +24,7 @@ mod triomphe;
 
 pub unsafe trait Pointer: Sized {
     fn into_ptr(value: Self) -> *const ();
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self>;
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self>;
 }
 
 pub unsafe trait NonNull {}
@@ -45,23 +45,23 @@ pub unsafe fn clone_in_place<T: Pointer + CloneInPlace>(ptr: *const ()) {
 
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Leak<T>(ManuallyDrop<T>);
+pub struct MaybeOwned<T>(ManuallyDrop<T>);
 
-impl<T> Leak<T> {
+impl<T> MaybeOwned<T> {
     pub const fn new(x: T) -> Self {
         Self(ManuallyDrop::new(x))
     }
 
-    pub const unsafe fn unleak(this: Self) -> T {
-        ManuallyDrop::into_inner(this.0)
+    pub const unsafe fn assume_owned(self) -> T {
+        ManuallyDrop::into_inner(self.0)
     }
 
-    pub unsafe fn map<U>(this: Self, f: impl FnOnce(T) -> U) -> Leak<U> {
-        Leak::new(f(unsafe { Self::unleak(this) }))
+    pub unsafe fn map<U>(self, f: impl FnOnce(T) -> U) -> MaybeOwned<U> {
+        MaybeOwned::new(f(unsafe { self.assume_owned() }))
     }
 }
 
-impl<T> Deref for Leak<T> {
+impl<T> Deref for MaybeOwned<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -75,8 +75,8 @@ unsafe impl<T> Pointer for *const T {
         value.cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
-        Leak::new(ptr.cast())
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
+        MaybeOwned::new(ptr.cast())
     }
 }
 
@@ -86,8 +86,8 @@ unsafe impl<T> Pointer for ptr::NonNull<T> {
         value.as_ptr() as *const ()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
-        Leak::new(unsafe { ptr::NonNull::new_unchecked(ptr as *mut T) })
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
+        MaybeOwned::new(unsafe { ptr::NonNull::new_unchecked(ptr as *mut T) })
     }
 }
 
@@ -99,8 +99,8 @@ unsafe impl<T> Pointer for &'static T {
         ptr::from_ref(value).cast()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
-        Leak::new(unsafe { &*ptr.cast() })
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
+        MaybeOwned::new(unsafe { &*ptr.cast() })
     }
 }
 
@@ -121,14 +121,14 @@ unsafe impl<T: Pointer + Aligned> Pointer for Option<T> {
         }
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
         let tag = ptr.addr() & Self::ALIGNMENT;
         let ptr = ptr.mask(!((Self::ALIGNMENT << 1) - 1));
 
         if tag == 0 {
-            unsafe { Leak::map(T::from_ptr(ptr), Some) }
+            unsafe { T::from_ptr(ptr).map(Some) }
         } else {
-            Leak::new(None)
+            MaybeOwned::new(None)
         }
     }
 }
@@ -152,14 +152,14 @@ unsafe impl<T: Pointer + Aligned, E: Pointer + Aligned> Pointer for Result<T, E>
         ptr.map_addr(|a| a | tag)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
         let tag = ptr.addr() & Self::ALIGNMENT;
         let ptr = ptr.mask(!((Self::ALIGNMENT << 1) - 1));
 
         if tag == 0 {
-            unsafe { Leak::map(T::from_ptr(ptr), Ok) }
+            unsafe { T::from_ptr(ptr).map(Ok) }
         } else {
-            unsafe { Leak::map(E::from_ptr(ptr), Err) }
+            unsafe { E::from_ptr(ptr).map(Err) }
         }
     }
 }
@@ -178,8 +178,8 @@ unsafe impl Pointer for usize {
         ptr::without_provenance(value)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
-        Leak::new(ptr.addr())
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
+        MaybeOwned::new(ptr.addr())
     }
 }
 
@@ -191,8 +191,8 @@ unsafe impl Pointer for NonZeroUsize {
         ptr::without_provenance(value.into())
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
-        Leak::new(unsafe { NonZeroUsize::new_unchecked(ptr.addr()) })
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
+        MaybeOwned::new(unsafe { NonZeroUsize::new_unchecked(ptr.addr()) })
     }
 }
 
@@ -206,9 +206,9 @@ unsafe impl Pointer for () {
         ptr::without_provenance(Self::ALIGNMENT)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
         debug_assert!(ptr.addr() == Self::ALIGNMENT);
-        Leak::new(())
+        MaybeOwned::new(())
     }
 }
 
@@ -252,8 +252,8 @@ unsafe impl<const N: u32> Pointer for Bits<N> {
         ptr::without_provenance(value.0 << Self::PTR_SHIFT)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
-        Leak::new(Self(ptr.addr() >> Self::PTR_SHIFT))
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
+        MaybeOwned::new(Self(ptr.addr() >> Self::PTR_SHIFT))
     }
 }
 
@@ -271,10 +271,10 @@ unsafe impl<P: Pointer + Aligned, const N: u32> Pointer for (P, Bits<N>) {
         ptr.map_addr(|a| a | tag)
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
         let tag = Bits::<N>::new_masked(ptr.addr() >> Self::ALIGNMENT.trailing_zeros());
         let ptr = ptr.mask(!(P::ALIGNMENT - 1));
-        unsafe { Leak::map(P::from_ptr(ptr), |p| (p, tag)) }
+        unsafe { P::from_ptr(ptr).map(|p| (p, tag)) }
     }
 }
 
@@ -330,11 +330,11 @@ unsafe impl<T: Pointer + NonNull> Pointer for Maybe<T> {
         }
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
         if ptr.is_null() {
-            Leak::new(Self(None))
+            MaybeOwned::new(Self(None))
         } else {
-            unsafe { Leak::map(T::from_ptr(ptr), |p| Self(Some(p))) }
+            unsafe { T::from_ptr(ptr).map(|p| Self(Some(p))) }
         }
     }
 }
@@ -354,9 +354,9 @@ unsafe impl Pointer for Null {
         ptr::null()
     }
 
-    unsafe fn from_ptr(ptr: *const ()) -> Leak<Self> {
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
         debug_assert!(ptr.is_null());
-        Leak::new(Null)
+        MaybeOwned::new(Null)
     }
 }
 

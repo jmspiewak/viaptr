@@ -11,25 +11,25 @@ use proptest::{
     sample::{select, Select},
     strategy::{Just, Strategy},
 };
-use viaptr::{Aligned, Bits, Leak, Maybe, NonNull, Null, Pointer};
+use viaptr::{Aligned, Bits, Maybe, NonNull, Null, Pointer};
 
 
 fn roundtrip<T: Pointer + Debug + Clone + PartialEq>(x: T) {
     let ptr = T::into_ptr(x.clone());
-    let y = unsafe { Leak::unleak(T::from_ptr(ptr)) };
+    let y = unsafe { T::from_ptr(ptr).assume_owned() };
     assert_eq!(x, y);
 }
 
 fn non_null<T: Pointer + NonNull>(x: T) {
     let ptr = T::into_ptr(x);
     assert!(!ptr.is_null());
-    unsafe { Leak::unleak(T::from_ptr(ptr)) };
+    unsafe { T::from_ptr(ptr).assume_owned() };
 }
 
 fn aligned<T: Pointer + Aligned>(x: T) {
     let ptr = T::into_ptr(x);
     assert!(ptr.is_aligned_to(T::ALIGNMENT));
-    unsafe { Leak::unleak(T::from_ptr(ptr)) };
+    unsafe { T::from_ptr(ptr).assume_owned() };
 }
 
 
@@ -153,7 +153,7 @@ proptest! {
         type T = rc::Weak<usize>;
         let x = Rc::downgrade(&src);
         let ptr = T::into_ptr(x);
-        let y = unsafe { Leak::unleak(T::from_ptr(ptr)) };
+        let y = unsafe { T::from_ptr(ptr).assume_owned() };
         assert_eq!(y.upgrade(), Some(src))
     }
 
@@ -162,7 +162,7 @@ proptest! {
         type T = sync::Weak<usize>;
         let x = Arc::downgrade(&src);
         let ptr = T::into_ptr(x);
-        let y = unsafe { Leak::unleak(T::from_ptr(ptr)) };
+        let y = unsafe { T::from_ptr(ptr).assume_owned() };
         assert_eq!(y.upgrade(), Some(src))
     }
 }
