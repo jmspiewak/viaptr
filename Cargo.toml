@@ -9,3 +9,6 @@ triomphe = { version = "0.1.11", optional = true, default-features = false }
 [features]
 default = ["std"]
 std = []
+
+[dev-dependencies]
+proptest = "1.4.0"

@@ -1,7 +1,7 @@
 #![feature(ptr_mask)]
 #![feature(strict_provenance)]
 #![feature(doc_cfg)]
-#![cfg_attr(not(any(feature = "std", doc)), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![warn(unsafe_op_in_unsafe_fn)]
 
 use core::{
@@ -13,11 +13,11 @@ use core::{
     ptr,
 };
 
-#[cfg(any(feature = "std", doc))]
+#[cfg(feature = "std")]
 #[doc(cfg(feature = "std"))]
 mod std;
 
-#[cfg(any(feature = "triomphe", doc))]
+#[cfg(feature = "triomphe")]
 #[doc(cfg(feature = "triomphe"))]
 mod triomphe;
 
