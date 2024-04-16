@@ -39,7 +39,7 @@ fn clone_in_place<T: CloneInPlace + Debug + Clone + PartialEq>(x: &T) {
     let ptr = T::into_ptr(x.clone());
 
     for _ in 0 .. CIP_ITERS {
-        unsafe { T::clone_in_place(ptr) };
+        unsafe { T::clone_by_ptr(ptr) };
     }
 
     for _ in 0 .. CIP_ITERS + 1 {

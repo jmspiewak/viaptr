@@ -35,6 +35,10 @@ pub unsafe trait Pointer: Sized {
 
     fn into_ptr(value: Self) -> *const ();
     unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self>;
+
+    fn as_ptr(value: &Self) -> *const () {
+        Self::into_ptr(unsafe { ptr::read(value) })
+    }
 }
 
 
@@ -60,9 +64,20 @@ impl<T, const N: usize> AlignedTo<N> for T where
 
 /// A trait for types which can be cloned in place.
 pub trait CloneInPlace: Pointer<CLONE_IN_PLACE = true> + Clone {
-    unsafe fn clone_in_place(ptr: *const ()) {
-        let value = unsafe { Self::from_ptr(ptr) };
+    fn clone_in_place(value: &Self) {
         mem::forget(value.clone());
+    }
+
+    unsafe fn clone_from_ptr(ptr: *const ()) -> Self {
+        unsafe { Self::from_ptr(ptr) }.clone()
+    }
+
+    unsafe fn clone_by_ptr(ptr: *const ()) {
+        mem::forget(unsafe { Self::clone_from_ptr(ptr) })
+    }
+
+    unsafe fn drop_one(ptr: *const ()) {
+        unsafe { Self::from_ptr(ptr).assume_owned() };
     }
 }
 
@@ -85,6 +100,10 @@ impl<T> MaybeOwned<T> {
 
     pub const unsafe fn assume_owned(self) -> T {
         ManuallyDrop::into_inner(self.0)
+    }
+
+    pub unsafe fn drop(slot: &mut Self) {
+        unsafe { ManuallyDrop::drop(&mut slot.0) };
     }
 
     pub unsafe fn map<U>(self, f: impl FnOnce(T) -> U) -> MaybeOwned<U> {
