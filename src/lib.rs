@@ -129,30 +129,22 @@ unsafe impl<T> Pointer for &'static T {
     }
 }
 
-
-unsafe impl<T> Pointer for Option<T>
-where
-    T: Pointer + AlignedTo<2>,
-{
-    const NON_NULL: bool = T::NON_NULL;
-    const ALIGNMENT: usize = T::ALIGNMENT >> 1;
+unsafe impl<T: Pointer<NON_NULL = true>> Pointer for Option<T> {
+    const ALIGNMENT: usize = T::ALIGNMENT;
     const CLONE_IN_PLACE: bool = T::CLONE_IN_PLACE;
 
     fn into_ptr(value: Self) -> *const () {
         match value {
             Some(x) => T::into_ptr(x),
-            None => ptr::without_provenance(Self::ALIGNMENT),
+            None => ptr::null(),
         }
     }
 
     unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
-        let tag = ptr.addr() & Self::ALIGNMENT;
-        let ptr = ptr.mask(!((Self::ALIGNMENT << 1) - 1));
-
-        if tag == 0 {
-            unsafe { T::from_ptr(ptr).map(Some) }
-        } else {
+        if ptr.is_null() {
             MaybeOwned::new(None)
+        } else {
+            unsafe { T::from_ptr(ptr).map(Some) }
         }
     }
 }
@@ -314,21 +306,21 @@ where
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Maybe<T>(pub Option<T>);
+pub struct NestOption<T>(pub Option<T>);
 
-impl<T> From<Option<T>> for Maybe<T> {
+impl<T> From<Option<T>> for NestOption<T> {
     fn from(value: Option<T>) -> Self {
         Self(value)
     }
 }
 
-impl<T> From<Maybe<T>> for Option<T> {
-    fn from(value: Maybe<T>) -> Self {
+impl<T> From<NestOption<T>> for Option<T> {
+    fn from(value: NestOption<T>) -> Self {
         value.0
     }
 }
 
-impl<T> Deref for Maybe<T> {
+impl<T> Deref for NestOption<T> {
     type Target = Option<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -336,34 +328,41 @@ impl<T> Deref for Maybe<T> {
     }
 }
 
-impl<T> DerefMut for Maybe<T> {
+impl<T> DerefMut for NestOption<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<T> Borrow<Option<T>> for Maybe<T> {
+impl<T> Borrow<Option<T>> for NestOption<T> {
     fn borrow(&self) -> &Option<T> {
         &self.0
     }
 }
 
-unsafe impl<T: Pointer<NON_NULL = true>> Pointer for Maybe<T> {
-    const ALIGNMENT: usize = T::ALIGNMENT;
+unsafe impl<T> Pointer for NestOption<T>
+where
+    T: Pointer + AlignedTo<2>,
+{
+    const NON_NULL: bool = T::NON_NULL;
+    const ALIGNMENT: usize = T::ALIGNMENT >> 1;
     const CLONE_IN_PLACE: bool = T::CLONE_IN_PLACE;
 
     fn into_ptr(value: Self) -> *const () {
         match value.into() {
             Some(x) => T::into_ptr(x),
-            None => ptr::null(),
+            None => ptr::without_provenance(Self::ALIGNMENT),
         }
     }
 
     unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
-        if ptr.is_null() {
-            MaybeOwned::new(Self(None))
-        } else {
+        let tag = ptr.addr() & Self::ALIGNMENT;
+        let ptr = ptr.mask(!((Self::ALIGNMENT << 1) - 1));
+
+        if tag == 0 {
             unsafe { T::from_ptr(ptr).map(|p| Self(Some(p))) }
+        } else {
+            MaybeOwned::new(Self(None))
         }
     }
 }

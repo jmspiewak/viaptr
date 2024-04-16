@@ -12,7 +12,9 @@ use proptest::{
     sample::{select, Select},
     strategy::{Just, Strategy},
 };
-use viaptr::{AlignedTo, Bits, CloneInPlace, Eval, FitsInUsize, Maybe, NonNull, Null, Pointer};
+use viaptr::{
+    AlignedTo, Bits, CloneInPlace, Eval, FitsInUsize, NestOption, NonNull, Null, Pointer,
+};
 
 
 fn pointer<T: Pointer + Debug + Clone + PartialEq>(x: &T) {
@@ -102,7 +104,7 @@ where
     bits::usize::masked(Bits::<N>::MASK).prop_map(Bits::<N>::new_masked)
 }
 
-fn maybe<T: Strategy>(x: T) -> impl Strategy<Value = Maybe<T::Value>> {
+fn nest_option<T: Strategy>(x: T) -> impl Strategy<Value = NestOption<T::Value>> {
     option(x).prop_map(From::from)
 }
 
@@ -154,14 +156,14 @@ gen! {
     basic1 (P) some_ptr();
     basic2 (P, N) some_non_null();
     basic3 (P, N, A, C) some_ref();
-    basic4 (P, N, A, C) option(some_ref());
+    basic4 (P, A, C) option(some_ref());
     basic5 (P, N, A, C) result(some_ref(), some_ref());
     basic6 (P, C) usize();
     basic7 (P, N, C) non_zero();
     basic8 (P, N, A, C) unit();
     basic9 (P, A, C) bits::<5>();
     basic10 (P, N, A, C) (some_ref(), bits::<2>());
-    basic11 (P, A, C) maybe(some_ref());
+    basic11 (P, N, A, C) nest_option(some_ref());
     basic12 (P, A, C) null();
     basic13 (P, N, A) boxed(usize());
     basic14 (P, N, A, C) rc(usize());
