@@ -24,6 +24,7 @@ mod std;
 mod triomphe;
 
 
+/// Conversion to and from `*const ()`.
 pub unsafe trait Pointer: Sized {
     const NON_NULL: bool = false;
     const ALIGNMENT: usize = 1;
@@ -34,9 +35,11 @@ pub unsafe trait Pointer: Sized {
 }
 
 
+/// Require non-null pointers from [`Pointer::into_ptr`].
 pub trait NonNull: Pointer<NON_NULL = true> {}
 impl<T: Pointer<NON_NULL = true>> NonNull for T {}
 
+/// Verify [`Pointer`] alignment validity and magnitude.
 pub trait VerifyAlignment<const N: usize>: Pointer {
     const VALID: bool = Self::ALIGNMENT.is_power_of_two() && N.is_power_of_two();
     const SUFFICIENT: bool = Self::ALIGNMENT >= N;
@@ -44,6 +47,7 @@ pub trait VerifyAlignment<const N: usize>: Pointer {
 
 impl<T: Pointer, const N: usize> VerifyAlignment<N> for T {}
 
+/// Require minimum [`Pointer`] alignment.
 pub trait AlignedTo<const N: usize>: VerifyAlignment<N, VALID = true, SUFFICIENT = true> {}
 
 impl<T, const N: usize> AlignedTo<N> for T where
@@ -51,6 +55,7 @@ impl<T, const N: usize> AlignedTo<N> for T where
 {
 }
 
+/// A trait for types which can be cloned in place.
 pub trait CloneInPlace: Pointer<CLONE_IN_PLACE = true> + Clone {
     unsafe fn clone_in_place(ptr: *const ()) {
         let value = unsafe { Self::from_ptr(ptr) };
@@ -60,11 +65,13 @@ pub trait CloneInPlace: Pointer<CLONE_IN_PLACE = true> + Clone {
 
 impl<T: Pointer<CLONE_IN_PLACE = true> + Clone> CloneInPlace for T {}
 
+/// Predicate evaluation trait.
 pub trait Eval {
     const RESULT: bool;
 }
 
 
+/// A wrapper type to construct values which might not own their contents.
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MaybeOwned<T>(ManuallyDrop<T>);
 
@@ -224,13 +231,15 @@ unsafe impl Pointer for () {
 }
 
 
-pub struct FitsInUsize<const BITS: u32>;
+/// A predicate checking if [`usize`] has at least `N` bits.
+pub struct FitsInUsize<const N: u32>;
 
-impl<const BITS: u32> Eval for FitsInUsize<BITS> {
-    const RESULT: bool = BITS <= usize::BITS;
+impl<const N: u32> Eval for FitsInUsize<N> {
+    const RESULT: bool = N <= usize::BITS;
 }
 
 
+/// Unsigned integers at most `N` bits long.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Bits<const N: u32>(usize);
 
@@ -275,6 +284,7 @@ where
 }
 
 
+/// A predicate checking if `P` is aligned enough to fit `N` bits.
 pub struct FreeBits<P, const N: u32>(PhantomData<P>);
 
 impl<P: Pointer, const N: u32> Eval for FreeBits<P, N> {
@@ -305,6 +315,7 @@ where
 }
 
 
+/// Like [`Option`], but preserves [`Pointer`] implementation when nested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NestOption<T>(pub Option<T>);
 
@@ -368,6 +379,7 @@ where
 }
 
 
+/// A value always encoded as a null pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Null;
 
