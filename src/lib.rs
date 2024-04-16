@@ -3,7 +3,7 @@
 #![feature(ptr_mask)]
 #![feature(strict_provenance)]
 #![warn(unsafe_op_in_unsafe_fn)]
-#![cfg_attr(not(feature = "std"), no_std)]
+#![no_std]
 
 use core::{
     borrow::Borrow,
@@ -15,13 +15,16 @@ use core::{
     ptr,
 };
 
-#[cfg(feature = "std")]
-#[doc(cfg(feature = "std"))]
-mod std;
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[cfg(feature = "alloc")]
+#[doc(cfg(feature = "alloc"))]
+mod impl_alloc;
 
 #[cfg(feature = "triomphe")]
 #[doc(cfg(feature = "triomphe"))]
-mod triomphe;
+mod impl_triomphe;
 
 
 /// Conversion to and from `*const ()`.

@@ -7,8 +7,8 @@ edition = "2021"
 triomphe = { version = "0.1.11", optional = true, default-features = false }
 
 [features]
-default = ["std"]
-std = []
+default = ["alloc"]
+alloc = []
 
 [dev-dependencies]
 proptest = "1.4.0"

@@ -1,5 +1,10 @@
+use alloc::{
+    boxed::Box,
+    rc,
+    rc::Rc,
+    sync::{self, Arc},
+};
 use core::{mem::align_of, sync::atomic::AtomicUsize};
-use std::{rc, rc::Rc, sync, sync::Arc};
 
 use crate::{max, MaybeOwned, Pointer};
 
