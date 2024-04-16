@@ -100,6 +100,12 @@ impl<T> Deref for MaybeOwned<T> {
     }
 }
 
+impl<T> Borrow<T> for MaybeOwned<T> {
+    fn borrow(&self) -> &T {
+        self.0.borrow()
+    }
+}
+
 
 unsafe impl<T> Pointer for *const T {
     fn into_ptr(value: Self) -> *const () {
