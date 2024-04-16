@@ -1,4 +1,5 @@
-#![feature(pointer_is_aligned)]
+#![feature(associated_const_equality)]
+#![feature(pointer_is_aligned_to)]
 
 use std::{fmt::Debug, num::NonZeroUsize, ptr, rc, rc::Rc, sync, sync::Arc};
 
@@ -11,25 +12,38 @@ use proptest::{
     sample::{select, Select},
     strategy::{Just, Strategy},
 };
-use viaptr::{Aligned, Bits, Maybe, NonNull, Null, Pointer};
+use viaptr::{AlignedTo, Bits, CloneInPlace, Eval, FitsInUsize, Maybe, NonNull, Null, Pointer};
 
 
-fn roundtrip<T: Pointer + Debug + Clone + PartialEq>(x: T) {
+fn pointer<T: Pointer + Debug + Clone + PartialEq>(x: &T) {
     let ptr = T::into_ptr(x.clone());
     let y = unsafe { T::from_ptr(ptr).assume_owned() };
-    assert_eq!(x, y);
-}
+    assert_eq!(*x, y);
 
-fn non_null<T: Pointer + NonNull>(x: T) {
-    let ptr = T::into_ptr(x);
-    assert!(!ptr.is_null());
-    unsafe { T::from_ptr(ptr).assume_owned() };
-}
+    if T::NON_NULL {
+        assert!(!ptr.is_null());
+    }
 
-fn aligned<T: Pointer + Aligned>(x: T) {
-    let ptr = T::into_ptr(x);
     assert!(ptr.is_aligned_to(T::ALIGNMENT));
-    unsafe { T::from_ptr(ptr).assume_owned() };
+}
+
+fn non_null<T: NonNull>(_: &T) {}
+fn aligned<T: AlignedTo<2>>(_: &T) {}
+
+
+const CIP_ITERS: usize = 10;
+
+fn clone_in_place<T: CloneInPlace + Debug + Clone + PartialEq>(x: &T) {
+    let ptr = T::into_ptr(x.clone());
+
+    for _ in 0 .. CIP_ITERS {
+        unsafe { T::clone_in_place(ptr) };
+    }
+
+    for _ in 0 .. CIP_ITERS + 1 {
+        let y = unsafe { T::from_ptr(ptr).assume_owned() };
+        assert_eq!(*x, y);
+    }
 }
 
 
@@ -81,7 +95,10 @@ fn unit() -> Just<()> {
     Just(())
 }
 
-fn bits<const N: u32>() -> impl Strategy<Value = Bits<N>> {
+fn bits<const N: u32>() -> impl Strategy<Value = Bits<N>>
+where
+    FitsInUsize<N>: Eval<RESULT = true>,
+{
     bits::usize::masked(Bits::<N>::MASK).prop_map(Bits::<N>::new_masked)
 }
 
@@ -116,35 +133,39 @@ macro_rules! gen {
         )+}
     };
 
-    (@R $x:ident) => {
-        roundtrip(Clone::clone(&$x))
+    (@P $x:ident) => {
+        pointer(&$x)
     };
 
     (@N $x:ident) => {
-        non_null(Clone::clone(&$x))
+        non_null(&$x)
     };
 
     (@A $x:ident) => {
-        aligned($x)
+        aligned(&$x)
+    };
+
+    (@C $x:ident) => {
+        clone_in_place(&$x)
     };
 }
 
 gen! {
-    basic1 (R) some_ptr();
-    basic2 (R, N) some_non_null();
-    basic3 (R, N, A) some_ref();
-    basic4 (R, N, A) option(some_ref());
-    basic5 (R, N, A) result(some_ref(), some_ref());
-    basic6 (R) usize();
-    basic7 (R, N) non_zero();
-    basic8 (R, N, A) unit();
-    basic9 (R, A) bits::<5>();
-    basic10 (R, N, A) (some_ref(), bits::<2>());
-    basic11 (R, A) maybe(some_ref());
-    basic12 (R, A) null();
-    basic13 (R, N, A) boxed(usize());
-    basic14 (R, N, A) rc(usize());
-    basic15 (R, N, A) arc(usize());
+    basic1 (P) some_ptr();
+    basic2 (P, N) some_non_null();
+    basic3 (P, N, A, C) some_ref();
+    basic4 (P, N, A, C) option(some_ref());
+    basic5 (P, N, A, C) result(some_ref(), some_ref());
+    basic6 (P, C) usize();
+    basic7 (P, N, C) non_zero();
+    basic8 (P, N, A, C) unit();
+    basic9 (P, A, C) bits::<5>();
+    basic10 (P, N, A, C) (some_ref(), bits::<2>());
+    basic11 (P, A, C) maybe(some_ref());
+    basic12 (P, A, C) null();
+    basic13 (P, N, A) boxed(usize());
+    basic14 (P, N, A, C) rc(usize());
+    basic15 (P, N, A, C) arc(usize());
 }
 
 proptest! {
@@ -177,7 +198,7 @@ mod triomphe {
     };
     use triomphe::{Arc, ThinArc};
 
-    use super::{aligned, non_null, roundtrip, usize};
+    use super::{aligned, clone_in_place, non_null, pointer, usize};
 
 
     fn arc<T: Strategy>(x: T) -> impl Strategy<Value = Arc<T::Value>> {
@@ -193,7 +214,7 @@ mod triomphe {
 
 
     gen! {
-        t1 (R, N, A) arc(usize());
-        t2 (R, N, A) thin_arc(usize(), vec(usize(), 0..5));
+        t1 (P, N, A, C) arc(usize());
+        t2 (P, N, A, C) thin_arc(usize(), vec(usize(), 0..5));
     }
 }

@@ -1,11 +1,13 @@
+#![feature(associated_const_equality)]
+#![feature(doc_cfg)]
 #![feature(ptr_mask)]
 #![feature(strict_provenance)]
-#![feature(doc_cfg)]
-#![cfg_attr(not(feature = "std"), no_std)]
 #![warn(unsafe_op_in_unsafe_fn)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use core::{
     borrow::Borrow,
+    marker::PhantomData,
     mem,
     mem::{align_of, ManuallyDrop},
     num::NonZeroUsize,
@@ -23,24 +25,43 @@ mod triomphe;
 
 
 pub unsafe trait Pointer: Sized {
+    const NON_NULL: bool = false;
+    const ALIGNMENT: usize = 1;
+    const CLONE_IN_PLACE: bool = false;
+
     fn into_ptr(value: Self) -> *const ();
     unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self>;
 }
 
-pub unsafe trait NonNull {}
 
-pub unsafe trait Aligned {
-    const ALIGNMENT: usize;
+pub trait NonNull: Pointer<NON_NULL = true> {}
+impl<T: Pointer<NON_NULL = true>> NonNull for T {}
 
-    #[doc(hidden)]
-    const VALID_ALIGNMENT: () = assert!(Self::ALIGNMENT.is_power_of_two());
+pub trait VerifyAlignment<const N: usize>: Pointer {
+    const VALID: bool = Self::ALIGNMENT.is_power_of_two() && N.is_power_of_two();
+    const SUFFICIENT: bool = Self::ALIGNMENT >= N;
 }
 
-pub unsafe trait CloneInPlace: Clone {}
+impl<T: Pointer, const N: usize> VerifyAlignment<N> for T {}
 
-pub unsafe fn clone_in_place<T: Pointer + CloneInPlace>(ptr: *const ()) {
-    let value = unsafe { T::from_ptr(ptr) };
-    mem::forget(value.clone());
+pub trait AlignedTo<const N: usize>: VerifyAlignment<N, VALID = true, SUFFICIENT = true> {}
+
+impl<T, const N: usize> AlignedTo<N> for T where
+    T: VerifyAlignment<N, VALID = true, SUFFICIENT = true>
+{
+}
+
+pub trait CloneInPlace: Pointer<CLONE_IN_PLACE = true> + Clone {
+    unsafe fn clone_in_place(ptr: *const ()) {
+        let value = unsafe { Self::from_ptr(ptr) };
+        mem::forget(value.clone());
+    }
+}
+
+impl<T: Pointer<CLONE_IN_PLACE = true> + Clone> CloneInPlace for T {}
+
+pub trait Eval {
+    const RESULT: bool;
 }
 
 
@@ -82,6 +103,8 @@ unsafe impl<T> Pointer for *const T {
 
 
 unsafe impl<T> Pointer for ptr::NonNull<T> {
+    const NON_NULL: bool = true;
+
     fn into_ptr(value: Self) -> *const () {
         value.as_ptr() as *const ()
     }
@@ -91,10 +114,12 @@ unsafe impl<T> Pointer for ptr::NonNull<T> {
     }
 }
 
-unsafe impl<T> NonNull for ptr::NonNull<T> {}
-
 
 unsafe impl<T> Pointer for &'static T {
+    const NON_NULL: bool = true;
+    const ALIGNMENT: usize = align_of::<T>();
+    const CLONE_IN_PLACE: bool = true;
+
     fn into_ptr(value: Self) -> *const () {
         ptr::from_ref(value).cast()
     }
@@ -104,16 +129,15 @@ unsafe impl<T> Pointer for &'static T {
     }
 }
 
-unsafe impl<T> NonNull for &'static T {}
 
-unsafe impl<T> Aligned for &'static T {
-    const ALIGNMENT: usize = align_of::<T>();
-}
+unsafe impl<T> Pointer for Option<T>
+where
+    T: Pointer + AlignedTo<2>,
+{
+    const NON_NULL: bool = T::NON_NULL;
+    const ALIGNMENT: usize = T::ALIGNMENT >> 1;
+    const CLONE_IN_PLACE: bool = T::CLONE_IN_PLACE;
 
-unsafe impl<T> CloneInPlace for &'static T {}
-
-
-unsafe impl<T: Pointer + Aligned> Pointer for Option<T> {
     fn into_ptr(value: Self) -> *const () {
         match value {
             Some(x) => T::into_ptr(x),
@@ -133,16 +157,16 @@ unsafe impl<T: Pointer + Aligned> Pointer for Option<T> {
     }
 }
 
-unsafe impl<T: NonNull> NonNull for Option<T> {}
 
-unsafe impl<T: Aligned> Aligned for Option<T> {
-    const ALIGNMENT: usize = T::ALIGNMENT >> 1;
-}
+unsafe impl<T, E> Pointer for Result<T, E>
+where
+    T: Pointer + AlignedTo<2>,
+    E: Pointer + AlignedTo<2>,
+{
+    const NON_NULL: bool = T::NON_NULL;
+    const ALIGNMENT: usize = min(T::ALIGNMENT, E::ALIGNMENT) >> 1;
+    const CLONE_IN_PLACE: bool = T::CLONE_IN_PLACE && E::CLONE_IN_PLACE;
 
-unsafe impl<T: CloneInPlace> CloneInPlace for Option<T> {}
-
-
-unsafe impl<T: Pointer + Aligned, E: Pointer + Aligned> Pointer for Result<T, E> {
     fn into_ptr(value: Self) -> *const () {
         let (ptr, tag) = match value {
             Ok(x) => (T::into_ptr(x), 0),
@@ -164,16 +188,10 @@ unsafe impl<T: Pointer + Aligned, E: Pointer + Aligned> Pointer for Result<T, E>
     }
 }
 
-unsafe impl<T: NonNull, E> NonNull for Result<T, E> {}
-
-unsafe impl<T: Aligned, E: Aligned> Aligned for Result<T, E> {
-    const ALIGNMENT: usize = min(T::ALIGNMENT, E::ALIGNMENT) >> 1;
-}
-
-unsafe impl<T: CloneInPlace, E: CloneInPlace> CloneInPlace for Result<T, E> {}
-
 
 unsafe impl Pointer for usize {
+    const CLONE_IN_PLACE: bool = true;
+
     fn into_ptr(value: Self) -> *const () {
         ptr::without_provenance(value)
     }
@@ -183,10 +201,11 @@ unsafe impl Pointer for usize {
     }
 }
 
-unsafe impl CloneInPlace for usize {}
-
 
 unsafe impl Pointer for NonZeroUsize {
+    const NON_NULL: bool = true;
+    const CLONE_IN_PLACE: bool = true;
+
     fn into_ptr(value: Self) -> *const () {
         ptr::without_provenance(value.into())
     }
@@ -196,12 +215,12 @@ unsafe impl Pointer for NonZeroUsize {
     }
 }
 
-unsafe impl NonNull for NonZeroUsize {}
-
-unsafe impl CloneInPlace for NonZeroUsize {}
-
 
 unsafe impl Pointer for () {
+    const NON_NULL: bool = true;
+    const ALIGNMENT: usize = 1 << (usize::BITS - 1);
+    const CLONE_IN_PLACE: bool = true;
+
     fn into_ptr(_: Self) -> *const () {
         ptr::without_provenance(Self::ALIGNMENT)
     }
@@ -212,21 +231,21 @@ unsafe impl Pointer for () {
     }
 }
 
-unsafe impl NonNull for () {}
 
-unsafe impl Aligned for () {
-    const ALIGNMENT: usize = 1 << (usize::BITS - 1);
+pub struct FitsInUsize<const BITS: u32>;
+
+impl<const BITS: u32> Eval for FitsInUsize<BITS> {
+    const RESULT: bool = BITS <= usize::BITS;
 }
-
-unsafe impl CloneInPlace for () {}
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Bits<const N: u32>(usize);
 
-impl<const N: u32> Bits<N> {
-    #[doc(hidden)]
-    pub const FITS: () = assert!(N <= usize::BITS);
+impl<const N: u32> Bits<N>
+where
+    FitsInUsize<N>: Eval<RESULT = true>,
+{
     pub const MASK: usize = (1 << N) - 1;
     const PTR_SHIFT: u32 = usize::BITS - N;
 
@@ -247,7 +266,13 @@ impl<const N: u32> Bits<N> {
     }
 }
 
-unsafe impl<const N: u32> Pointer for Bits<N> {
+unsafe impl<const N: u32> Pointer for Bits<N>
+where
+    FitsInUsize<N>: Eval<RESULT = true>,
+{
+    const ALIGNMENT: usize = 1 << Self::PTR_SHIFT;
+    const CLONE_IN_PLACE: bool = true;
+
     fn into_ptr(value: Self) -> *const () {
         ptr::without_provenance(value.0 << Self::PTR_SHIFT)
     }
@@ -257,14 +282,23 @@ unsafe impl<const N: u32> Pointer for Bits<N> {
     }
 }
 
-unsafe impl<const N: u32> Aligned for Bits<N> {
-    const ALIGNMENT: usize = 1 << Self::PTR_SHIFT;
+
+pub struct FreeBits<P, const N: u32>(PhantomData<P>);
+
+impl<P: Pointer, const N: u32> Eval for FreeBits<P, N> {
+    const RESULT: bool = P::ALIGNMENT >= (1 << N);
 }
 
-unsafe impl<const N: u32> CloneInPlace for Bits<N> {}
+unsafe impl<P, const N: u32> Pointer for (P, Bits<N>)
+where
+    P: Pointer,
+    FitsInUsize<N>: Eval<RESULT = true>,
+    FreeBits<P, N>: Eval<RESULT = true>,
+{
+    const NON_NULL: bool = P::NON_NULL;
+    const ALIGNMENT: usize = P::ALIGNMENT >> N;
+    const CLONE_IN_PLACE: bool = P::CLONE_IN_PLACE;
 
-
-unsafe impl<P: Pointer + Aligned, const N: u32> Pointer for (P, Bits<N>) {
     fn into_ptr(value: Self) -> *const () {
         let ptr = P::into_ptr(value.0);
         let tag = value.1.value() << Self::ALIGNMENT.trailing_zeros();
@@ -277,14 +311,6 @@ unsafe impl<P: Pointer + Aligned, const N: u32> Pointer for (P, Bits<N>) {
         unsafe { P::from_ptr(ptr).map(|p| (p, tag)) }
     }
 }
-
-unsafe impl<P: NonNull, const N: u32> NonNull for (P, Bits<N>) {}
-
-unsafe impl<P: Aligned, const N: u32> Aligned for (P, Bits<N>) {
-    const ALIGNMENT: usize = P::ALIGNMENT >> N;
-}
-
-unsafe impl<P: CloneInPlace, const N: u32> CloneInPlace for (P, Bits<N>) {}
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -322,7 +348,10 @@ impl<T> Borrow<Option<T>> for Maybe<T> {
     }
 }
 
-unsafe impl<T: Pointer + NonNull> Pointer for Maybe<T> {
+unsafe impl<T: Pointer<NON_NULL = true>> Pointer for Maybe<T> {
+    const ALIGNMENT: usize = T::ALIGNMENT;
+    const CLONE_IN_PLACE: bool = T::CLONE_IN_PLACE;
+
     fn into_ptr(value: Self) -> *const () {
         match value.into() {
             Some(x) => T::into_ptr(x),
@@ -339,17 +368,14 @@ unsafe impl<T: Pointer + NonNull> Pointer for Maybe<T> {
     }
 }
 
-unsafe impl<T: Aligned> Aligned for Maybe<T> {
-    const ALIGNMENT: usize = T::ALIGNMENT;
-}
-
-unsafe impl<T: CloneInPlace> CloneInPlace for Maybe<T> {}
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Null;
 
 unsafe impl Pointer for Null {
+    const ALIGNMENT: usize = 1 << (usize::BITS - 1);
+    const CLONE_IN_PLACE: bool = true;
+
     fn into_ptr(_: Self) -> *const () {
         ptr::null()
     }
@@ -359,12 +385,6 @@ unsafe impl Pointer for Null {
         MaybeOwned::new(Null)
     }
 }
-
-unsafe impl Aligned for Null {
-    const ALIGNMENT: usize = 1 << (usize::BITS - 1);
-}
-
-unsafe impl CloneInPlace for Null {}
 
 
 pub(crate) const fn min(x: usize, y: usize) -> usize {

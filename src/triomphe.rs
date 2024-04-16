@@ -2,10 +2,14 @@ use core::{mem::align_of, sync::atomic::AtomicUsize};
 
 use triomphe::{Arc, ThinArc};
 
-use crate::{max, Aligned, CloneInPlace, MaybeOwned, NonNull, Pointer};
+use crate::{max, MaybeOwned, Pointer};
 
 
 unsafe impl<T> Pointer for Arc<T> {
+    const NON_NULL: bool = true;
+    const ALIGNMENT: usize = max(align_of::<AtomicUsize>(), align_of::<T>());
+    const CLONE_IN_PLACE: bool = true;
+
     fn into_ptr(value: Self) -> *const () {
         Arc::into_raw(value).cast()
     }
@@ -15,16 +19,16 @@ unsafe impl<T> Pointer for Arc<T> {
     }
 }
 
-unsafe impl<T> NonNull for Arc<T> {}
-
-unsafe impl<T> Aligned for Arc<T> {
-    const ALIGNMENT: usize = max(align_of::<AtomicUsize>(), align_of::<T>());
-}
-
-unsafe impl<T> CloneInPlace for Arc<T> {}
-
 
 unsafe impl<H, T> Pointer for ThinArc<H, T> {
+    const NON_NULL: bool = true;
+    const CLONE_IN_PLACE: bool = true;
+
+    const ALIGNMENT: usize = max(
+        align_of::<AtomicUsize>(),
+        max(align_of::<H>(), align_of::<T>()),
+    );
+
     fn into_ptr(value: Self) -> *const () {
         ThinArc::into_raw(value).cast()
     }
@@ -33,14 +37,3 @@ unsafe impl<H, T> Pointer for ThinArc<H, T> {
         MaybeOwned::new(unsafe { ThinArc::from_raw(ptr.cast()) })
     }
 }
-
-unsafe impl<H, T> NonNull for ThinArc<H, T> {}
-
-unsafe impl<H, T> Aligned for ThinArc<H, T> {
-    const ALIGNMENT: usize = max(
-        align_of::<AtomicUsize>(),
-        max(align_of::<H>(), align_of::<T>()),
-    );
-}
-
-unsafe impl<H, T> CloneInPlace for ThinArc<H, T> {}
