@@ -19,6 +19,7 @@ use core::{
 extern crate alloc;
 
 pub mod compact;
+pub mod shy_atomic;
 
 #[cfg(feature = "alloc")]
 #[doc(cfg(feature = "alloc"))]
