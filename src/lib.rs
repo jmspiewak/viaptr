@@ -18,6 +18,8 @@ use core::{
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+pub mod compact;
+
 #[cfg(feature = "alloc")]
 #[doc(cfg(feature = "alloc"))]
 mod impl_alloc;
