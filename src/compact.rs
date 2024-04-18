@@ -30,6 +30,22 @@ impl<P: Pointer> Compact<P> {
             self,
         )
     }
+
+    pub fn set(&mut self, value: P) {
+        self.swap(value);
+    }
+
+    pub fn swap(&mut self, value: P) -> P {
+        let old = unsafe { P::from_ptr(self.0).assume_owned() };
+        self.0 = P::into_ptr(value);
+        old
+    }
+}
+
+impl<P: Pointer + Clone> Compact<P> {
+    pub fn get_clone(&self) -> P {
+        unsafe { P::from_ptr(self.0) }.deref().clone()
+    }
 }
 
 impl<P: Pointer> Drop for Compact<P> {
@@ -47,8 +63,7 @@ impl<P: Pointer + Debug> Debug for Compact<P> {
 
 impl<P: Pointer + Clone> Clone for Compact<P> {
     fn clone(&self) -> Self {
-        let value = unsafe { P::from_ptr(self.0) };
-        Self::new(value.deref().clone())
+        Self::new(self.get_clone())
     }
 }
 

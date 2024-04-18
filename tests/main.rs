@@ -1,9 +1,10 @@
 #![feature(associated_const_equality)]
 #![feature(pointer_is_aligned_to)]
 
-use std::{fmt::Debug, num::NonZeroUsize, ptr, rc, rc::Rc, sync, sync::Arc};
+use std::{fmt::Debug, num::NonZeroUsize, ops::Deref, ptr, rc, rc::Rc, sync, sync::Arc};
 
 use proptest::{
+    array::{uniform, UniformArrayStrategy},
     bits, num,
     num::usize,
     option::OptionStrategy,
@@ -13,7 +14,8 @@ use proptest::{
     strategy::{Just, Strategy},
 };
 use viaptr::{
-    AlignedTo, Bits, CloneInPlace, Eval, FitsInUsize, NestOption, NonNull, Null, Pointer,
+    compact::Compact, shy_atomic::ShyAtomic, AlignedTo, Bits, CloneInPlace, Eval, FitsInUsize,
+    NestOption, NonNull, Null, Pointer,
 };
 
 
@@ -124,6 +126,24 @@ fn arc<T: Strategy>(x: T) -> impl Strategy<Value = Arc<T::Value>> {
     x.prop_map(Arc::new)
 }
 
+fn array<T: Strategy, const N: usize>(x: T) -> UniformArrayStrategy<T, [T::Value; N]> {
+    uniform(x)
+}
+
+fn compound() -> impl Strategy<Value: Pointer + Debug + Clone + PartialEq> {
+    result(
+        result(arc(usize()), rc(usize())),
+        result(option(boxed(usize())), bits::<20>()),
+    )
+}
+
+fn compound_cip() -> impl Strategy<Value: CloneInPlace + Debug + PartialEq> {
+    result(
+        result(arc(usize()), rc(usize())),
+        result(option(arc(usize())), bits::<20>()),
+    )
+}
+
 
 macro_rules! gen {
     ($($name:ident ($($test:ident),+) $strategy:expr;)+) => {
@@ -168,6 +188,7 @@ gen! {
     basic13 (P, N, A) boxed(usize());
     basic14 (P, N, A, C) rc(usize());
     basic15 (P, N, A, C) arc(usize());
+    basic16 (P) compound();
 }
 
 proptest! {
@@ -218,5 +239,35 @@ mod triomphe {
     gen! {
         t1 (P, N, A, C) arc(usize());
         t2 (P, N, A, C) thin_arc(usize(), vec(usize(), 0..5));
+    }
+}
+
+
+proptest! {
+    #[test]
+    fn comapct([x, y, z] in array(compound())) {
+        let mut c = Compact::new(x.clone());
+        assert_eq!(x, c.get_clone());
+        assert_eq!(&x, c.get_ref().deref());
+        assert_eq!(&x, c.get_mut().deref());
+
+        let old = c.swap(y.clone());
+        assert_eq!(x, old);
+        assert_eq!(&y, c.get_ref().deref());
+
+        *c.get_mut() = z.clone();
+        assert_eq!(z, c.get_clone());
+    }
+
+    #[test]
+    fn shy_atomic([x, y, z, w] in array(compound_cip())) {
+        let a = ShyAtomic::new(x.clone());
+        assert_eq!(x, a.swap(y.clone()));
+        assert_eq!(y, a.swap(z.clone()));
+
+        if Pointer::as_ptr(&x) != Pointer::as_ptr(&z) {
+            assert_eq!(Err(&w), a.compare_exchange(&x, w.clone()).as_ref());
+            assert_eq!(Ok(&z), a.compare_exchange(&z, w.clone()).as_ref());
+        }
     }
 }
