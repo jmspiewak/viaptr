@@ -7,6 +7,7 @@ use crate::Pointer;
 
 
 /// An atomic pointer which can't be observed without modification.
+///
 /// To get the current value a new one must be supplied.
 #[derive(Debug)]
 pub struct ShyAtomic<P: Pointer>(AtomicPtr<()>, PhantomData<P>);

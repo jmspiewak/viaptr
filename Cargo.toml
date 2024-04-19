@@ -2,6 +2,11 @@
 name = "viaptr"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
+repository = "https://github.com/jmspiewak/viaptr"
+categories = ["memory-management", "data-structures"]
+license = "MPL-2.0"
+license-file = "LICENSE.txt"
 
 [dependencies]
 triomphe = { version = "0.1.11", optional = true, default-features = false }

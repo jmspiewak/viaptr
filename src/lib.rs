@@ -4,6 +4,7 @@
 #![feature(strict_provenance)]
 #![warn(unsafe_op_in_unsafe_fn)]
 #![no_std]
+#![doc = include_str!("../README.md")]
 
 use core::{
     borrow::Borrow,
@@ -28,7 +29,6 @@ mod impl_alloc;
 #[cfg(feature = "triomphe")]
 #[doc(cfg(feature = "triomphe"))]
 mod impl_triomphe;
-
 
 /// Conversion to and from `*const ()`.
 pub unsafe trait Pointer: Sized {
