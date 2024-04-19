@@ -2,6 +2,8 @@
 name = "viaptr"
 version = "0.1.0"
 edition = "2021"
+description = "An experimental library for packing complex types into pointer-sized fields"
+authors = ["jmspiewak"]
 readme = "README.md"
 repository = "https://github.com/jmspiewak/viaptr"
 categories = ["memory-management", "data-structures"]
