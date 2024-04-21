@@ -339,7 +339,85 @@ where
     }
 
     unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
-        let tag = Bits::<N>::new_masked(ptr.addr() >> Self::ALIGNMENT.trailing_zeros());
+        let tag = Bits::new_masked(ptr.addr() >> Self::ALIGNMENT.trailing_zeros());
+        let ptr = ptr.mask(!(P::ALIGNMENT - 1));
+        unsafe { P::from_ptr(ptr).map(|p| (p, tag)) }
+    }
+}
+
+
+/// Unsigned integer, always less than `N`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Num<const N: usize>(usize);
+
+impl<const N: usize> Num<N> {
+    pub const MASK: usize = N.next_power_of_two() - 1;
+    const PTR_SHIFT: u32 = usize::BITS - Self::MASK.trailing_ones();
+
+    pub const fn new(value: usize) -> Option<Self> {
+        if value >= N {
+            None
+        } else {
+            Some(Self(value))
+        }
+    }
+
+    pub const fn new_saturating(value: usize) -> Self {
+        Self(min(value, N - 1))
+    }
+
+    pub const fn new_wrapping(value: usize) -> Self {
+        Self(value % N)
+    }
+
+    pub const unsafe fn new_unchecked(value: usize) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> usize {
+        self.0
+    }
+}
+
+unsafe impl<const N: usize> Pointer for Num<N> {
+    const ALIGNMENT: usize = 1 << Self::PTR_SHIFT;
+    const CLONE_IN_PLACE: bool = true;
+
+    fn into_ptr(value: Self) -> *const () {
+        ptr::without_provenance(value.0 << Self::PTR_SHIFT)
+    }
+
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
+        MaybeOwned::new(Self(ptr.addr() >> Self::PTR_SHIFT))
+    }
+}
+
+
+/// A predicate checking if `P` is aligned enough to fit an unsigned int less than `N`.
+pub struct CanFitNum<P, const N: usize>(PhantomData<P>);
+
+impl<P: Pointer, const N: usize> Eval for CanFitNum<P, N> {
+    const RESULT: bool = P::ALIGNMENT >= N;
+}
+
+unsafe impl<P, const N: usize> Pointer for (P, Num<N>)
+where
+    P: Pointer,
+    CanFitNum<P, N>: Eval<RESULT = true>,
+{
+    const NON_NULL: bool = P::NON_NULL;
+    const ALIGNMENT: usize = P::ALIGNMENT / N.next_power_of_two();
+    const CLONE_IN_PLACE: bool = P::CLONE_IN_PLACE;
+
+    fn into_ptr(value: Self) -> *const () {
+        let ptr = P::into_ptr(value.0);
+        let tag = value.1.value() << Self::ALIGNMENT.trailing_zeros();
+        ptr.map_addr(|a| a | tag)
+    }
+
+    unsafe fn from_ptr(ptr: *const ()) -> MaybeOwned<Self> {
+        let tag = (ptr.addr() >> Self::ALIGNMENT.trailing_zeros()) & Num::<N>::MASK;
+        let tag = unsafe { Num::new_unchecked(tag) };
         let ptr = ptr.mask(!(P::ALIGNMENT - 1));
         unsafe { P::from_ptr(ptr).map(|p| (p, tag)) }
     }

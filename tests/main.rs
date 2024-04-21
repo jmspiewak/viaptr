@@ -15,11 +15,11 @@ use proptest::{
 };
 use viaptr::{
     compact::Compact, shy_atomic::ShyAtomic, AlignedTo, Bits, CloneInPlace, Eval, FitsInUsize,
-    NestOption, NonNull, Null, Pointer,
+    NestOption, NonNull, Null, Num, Pointer,
 };
 
 
-fn pointer<T: Pointer + Debug + Clone + PartialEq>(x: &T) {
+fn test_pointer<T: Pointer + Debug + Clone + PartialEq>(x: &T) {
     let ptr = T::into_ptr(x.clone());
     let y = unsafe { T::from_ptr(ptr).assume_owned() };
     assert_eq!(*x, y);
@@ -31,8 +31,8 @@ fn pointer<T: Pointer + Debug + Clone + PartialEq>(x: &T) {
     assert!(ptr.is_aligned_to(T::ALIGNMENT));
 }
 
-fn non_null<T: NonNull>(_: &T) {}
-fn aligned<T: AlignedTo<2>>(_: &T) {}
+fn test_non_null<T: NonNull>(_: &T) {}
+fn test_aligned<T: AlignedTo<2>>(_: &T) {}
 
 
 const CIP_ITERS: usize = 10;
@@ -50,6 +50,10 @@ fn clone_in_place<T: CloneInPlace + Debug + Clone + PartialEq>(x: &T) {
     }
 }
 
+
+#[repr(align(64))]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Aligned(usize);
 
 const PTRS: [*const usize; 4] = [
     ptr::from_ref(&0),
@@ -106,12 +110,20 @@ where
     bits::usize::masked(Bits::<N>::MASK).prop_map(Bits::<N>::new_masked)
 }
 
+fn num<const N: usize>() -> impl Strategy<Value = Num<N>> {
+    usize().prop_map(Num::new_wrapping)
+}
+
 fn nest_option<T: Strategy>(x: T) -> impl Strategy<Value = NestOption<T::Value>> {
     option(x).prop_map(From::from)
 }
 
 fn null() -> Just<Null> {
     Just(Null)
+}
+
+fn aligned() -> impl Strategy<Value = Aligned> {
+    usize().prop_map(Aligned)
 }
 
 fn boxed<T: Strategy>(x: T) -> impl Strategy<Value = Box<T::Value>> {
@@ -156,15 +168,15 @@ macro_rules! gen {
     };
 
     (@P $x:ident) => {
-        pointer(&$x)
+        test_pointer(&$x)
     };
 
     (@N $x:ident) => {
-        non_null(&$x)
+        test_non_null(&$x)
     };
 
     (@A $x:ident) => {
-        aligned(&$x)
+        test_aligned(&$x)
     };
 
     (@C $x:ident) => {
@@ -188,7 +200,11 @@ gen! {
     basic13 (P, N, A) boxed(usize());
     basic14 (P, N, A, C) rc(usize());
     basic15 (P, N, A, C) arc(usize());
-    basic16 (P) compound();
+    basic16 (P, A, C) num::<42>();
+
+    c1 (P) compound();
+    c2 (P, C) compound_cip();
+    c3 (P, N, C) result((arc(aligned()), num::<30>()), (rc(aligned()), bits::<5>()));
 }
 
 proptest! {
@@ -221,7 +237,7 @@ mod triomphe {
     };
     use triomphe::{Arc, ThinArc};
 
-    use super::{aligned, clone_in_place, non_null, pointer, usize};
+    use super::{clone_in_place, test_aligned, test_non_null, test_pointer, usize};
 
 
     fn arc<T: Strategy>(x: T) -> impl Strategy<Value = Arc<T::Value>> {
